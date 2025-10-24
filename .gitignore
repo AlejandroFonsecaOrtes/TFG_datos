@@ -1,0 +1,37 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data (keep big stuff out of Git)
+data/
+external_data/
+*.h5
+*.hdf5
+*.hdf
+*.npz
+*.npy
+*.mat
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.pth
+*.pt
+*.ckpt
+
+# Logs / cache
+logs/
+wandb/
+mlruns/
+*.log
+.DS_Store
+Thumbs.db
