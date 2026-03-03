@@ -1,0 +1,8 @@
+asignar un cluster a una media en fase
+juntar 2 runs y clusterizar para ver si 2 fases de distintas frecuencias de actuación son iguales
+probar tsne con scores de pca
+ver si el modo 1 es igual q la media en fase (los modos de spod son complejos)
+espectro en frecuencia de spca
+bajar tsne a 1 dimension y ver si se ordena en fase
+https://arxiv.org/abs/2109.02596
+https://www.arxiv.org/abs/2509.15517
