@@ -35,12 +35,7 @@ TFG_datos/
 │   ├── Van der Maaten and Hinton- Visualizing Data using t-SNE.pdf
 │   ├── Manifold Dimension Estimation - An Empirical Study.pdf
 │   └── ...
-│
-├── thesis/                    # LaTeX source for the thesis document
-│   ├── main.tex
-│   ├── main.pdf
-│   └── references.bib
-│
+
 └── code/
     ├── TODO.txt               # Detailed task breakdown for implementation
     ├── data_utils.py          # Data loading and velocity field plotting helpers
@@ -61,6 +56,7 @@ TFG_datos/
     ├── SPOD_Run1.ipynb                # SPOD computation and storage
     ├── SPOD_comparison.ipynb          # POD vs SPOD spectral analysis
     ├── phase_correspondence.ipynb     # Cluster centroids vs phase-averages validation
+    ├── centroid_phase_comparison.ipynb # Centroid vs phase-average comparison (K=20)
     ├── manifold_analysis.ipynb        # t-SNE topology, SPCA PSD, 1D projection
     └── cross_run_analysis.ipynb       # Multi-run clustering invariance test
 ```
@@ -77,6 +73,7 @@ Each notebook follows a strict **Markdown (math) → Code → Markdown (interpre
 | `SPOD_Run1.ipynb` | Computes and saves Spectral POD results for individual runs |
 | `SPOD_comparison.ipynb` | Compares POD and SPOD eigenspectra to identify tonal vs broadband energy |
 | `phase_correspondence.ipynb` | Validates unsupervised clusters against hardware-triggered phase-averages via cosine similarity |
+| `centroid_phase_comparison.ipynb` | Compares K=20 cluster centroids with phase-averaged fields using cosine similarity matrices |
 | `manifold_analysis.ipynb` | t-SNE on PCA vs SPCA scores, PSD of sparse temporal coefficients, 1D manifold projection |
 | `cross_run_analysis.ipynb` | Merges snapshots from multiple runs (St=0 and St=0.05) and tests topological invariance of the clustering |
 
@@ -109,4 +106,4 @@ All notebooks were developed with Python 3.x and standard Anaconda distributions
 - Navarro-González et al. (2022). A dual-time implementation of the SPOD.
 - Bi & Lafaye de Micheaux (2025). Manifold Dimension Estimation: An Empirical Study.
 
-See `papers/` for the full collection and `thesis/references.bib` for the BibTeX entries.
+See `papers/` for the full collection.

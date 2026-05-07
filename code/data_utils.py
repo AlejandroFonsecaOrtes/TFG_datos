@@ -49,7 +49,7 @@ def plot_spod_mode(X, Y, mode, title=None, scale=0.1, quiver_step=10, cmap="RdBu
     fig, ax = plt.subplots(figsize=(10, 6))
     cont = ax.contourf(X, Y, mag, cmap=cmap, levels=50)
     cbar = plt.colorbar(cont, ax=ax)
-    cbar.set_label("Mode Magnitude")
+    cbar.set_label("Mode Magnitude", fontsize=12)
 
     ax.quiver(
         X[::quiver_step, ::quiver_step],
@@ -59,24 +59,24 @@ def plot_spod_mode(X, Y, mode, title=None, scale=0.1, quiver_step=10, cmap="RdBu
         scale=scale, color="k", alpha=0.7
     )
 
-    ax.set_title(title or "SPOD Mode")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+    ax.set_title(title or "SPOD Mode", fontsize=14)
+    ax.set_xlabel("$x/D$", fontsize=12)
+    ax.set_ylabel("$y/D$", fontsize=12)
     ax.set_aspect("equal")
     plt.tight_layout()
     plt.show()
 
 
-def plot_velocity_field(X, Y, uc, vc, title=None, scale=20, quiver_step=5, cmap="jet"):
+def plot_velocity_field(X, Y, uc, vc, title=None, scale=20, quiver_step=5, cmap="RdBu_r"):
         # magnitude of centroid velocity
     mag = np.sqrt(uc**2 + vc**2)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # filled contour of magnitude
-    cont = ax.contourf(X, Y, mag, cmap="RdBu_r", levels=50)
+    cont = ax.contourf(X, Y, mag, cmap=cmap, levels=50)
     cbar = plt.colorbar(cont, ax=ax)
-    cbar.set_label("Velocity magnitude")
+    cbar.set_label("Velocity magnitude", fontsize=12)
 
     # black arrows on top
     ax.quiver(
@@ -87,9 +87,9 @@ def plot_velocity_field(X, Y, uc, vc, title=None, scale=20, quiver_step=5, cmap=
         scale=scale, color="k", alpha=0.7
     )
 
-    ax.set_title(title or "Velocity Field")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+    ax.set_title(title or "Velocity Field", fontsize=14)
+    ax.set_xlabel("$x/D$", fontsize=12)
+    ax.set_ylabel("$y/D$", fontsize=12)
     ax.set_aspect("equal")
     plt.tight_layout()
     plt.show()

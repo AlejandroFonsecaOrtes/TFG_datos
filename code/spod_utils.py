@@ -80,7 +80,7 @@ def compute_spod(U, V, n_fft=256, overlap=None, window_type='hamming', n_modes=N
         eigvals[f, :len(lam)] = lam.real
         # project the eigenvectors from snapshot space into the full physical
         # space, obtaining the actual SPOD modes.
-        eigvecs[f, :len(lam)] = (psi.T @ Qf).real / np.sqrt(lam[:, None])
+        eigvecs[f, :len(lam)] = (psi.T @ Qf) / np.sqrt(lam[:, None])
 
     # d is the sampling spacing (time between snapshots). At the moment I don't know it, so we will leave it as 1 for now and use Hz/dt
     freqs = np.fft.rfftfreq(n_fft, d=1.0)

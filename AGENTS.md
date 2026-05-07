@@ -9,7 +9,11 @@ Welcome. You are an AI agent assisting with a Bachelor's Thesis (TFG) on statist
 ## 2. Dataset Structure
 The project contains 25 experimental runs of a turbulent jet flow acquired via Particle Image Velocimetry (PIV). Each run corresponds to a different actuation Strouhal number (see `code/data/info.txt` for the full list). All data is non-dimensionalized: spatial coordinates as `X = x/D`, velocities as `U = u/U_inf`, with `Re = 10000`. Each run contains 2030 snapshots on a spatial grid of 269×319 points.
 
+**Note on snapshot counts:** The raw `.mat` files contain 2031 time steps for the velocity fields (`U`, `V`, `u`, `v`) and POD matrices (`Phi`, `Psi`, `Sig`). The compressed `.npz` files contain only 2030 snapshots because the first time step (which corresponds to a duplicate or initialization artifact from the PIV acquisition system) is discarded during pre-processing. All downstream analyses use the 2030-snapshot convention.
+
 **Important:** Always prefer the pre-processed `.npz` files over the raw `.mat` files unless you specifically need a variable that only exists in the `.mat` (e.g., phase-averages, POD modes, Reynolds stresses). The `.npz` files are significantly smaller and faster to load.
+
+**CRITICAL DATASET IMMUTABILITY:** Agents must NEVER modify, overwrite, or delete any of the stored `.mat` or `.npz` dataset files unless explicitly commanded by the user. Modifying these datasets will cause irreversible loss of the foundational experimental data. All transformations or analyses must be saved into new, distinct files or folders.
 
 ### 2.1 Raw Data — `code/data/RunX_PIV.mat`
 Loaded via `data_utils.load_piv_data()`. Each `.mat` file (~8 GB) contains the complete experimental dataset for one run:
@@ -59,6 +63,10 @@ Pre-computed Spectral Proper Orthogonal Decomposition results (~1.3 GB per run):
 | `X` | (269, 319) | float32 | Spatial grid X |
 | `Y` | (269, 319) | float32 | Spatial grid Y |
 
+**CRITICAL NOTE ON SPOD FREQUENCIES (`freqs`)**: 
+Because the experimental PIV setup captures exactly 20 snapshots per actuation cycle for all forced runs, the actuation frequency in discrete snapshot time is always exactly $1/20 = 0.05$ cycles/snapshot. Since the SPOD was originally computed with a default `dt=1.0` snapshot, the `freqs` array returned is in units of *cycles per snapshot*. 
+**When plotting or comparing spectra across runs, you MUST scale the `freqs` array to the physical Strouhal number ($St$).** Since $0.05 \text{ cycles/snapshot} = St_{act}$, multiply the `freqs` array by `(St_act / 0.05)` before analysis.
+
 ### 2.5 Sparse PCA Results — `code/SPCA_data/RUNX_PIV_SPCA.npz`
 Pre-computed Sparse PCA decomposition (currently only RUN2):
 
@@ -78,7 +86,43 @@ Pre-computed cluster assignments (currently only RUN2):
 |-----|-------|-------|-------------|
 | `labels` | (2030,) | int32 | Cluster label for each snapshot |
 
-### 2.7 Run Information — `code/data/info.txt`
+### 2.7 Phase-Averaged Data — `code/phase_avg_data/RUNX_phase_avg.npz`
+Extracted from the raw `.mat` files via `code/extract_phase_averages.py`. Contains only the phase-averaged velocity fields (currently only RUN2):
+
+| Key | Shape | Dtype | Description |
+|-----|-------|-------|-------------|
+| `Uph` | (20, 269, 319) | float32 | Phase-averaged horizontal velocity (reshaped from flat) |
+| `Vph` | (20, 269, 319) | float32 | Phase-averaged vertical velocity (reshaped from flat) |
+| `Um` | (269, 319) | float32 | Time-averaged horizontal velocity |
+| `Vm` | (269, 319) | float32 | Time-averaged vertical velocity |
+| `X` | (269, 319) | float32 | Spatial grid X |
+| `Y` | (269, 319) | float32 | Spatial grid Y |
+
+### 2.8 PCA Results — `code/pca_data/RUNX_PCA.npz`
+Independent Principal Component Analysis (PCA) computed for each run separately (500 components). This serves as a robust, denoised, and memory-efficient input for non-linear manifold learning algorithms.
+
+| Key | Shape | Dtype | Description |
+|-----|-------|-------|-------------|
+| `scores` | (2030, 500) | float32 | PCA temporal coefficients/scores |
+| `explained_variance_ratio` | (500,) | float32 | Fraction of variance explained by each component |
+
+### 2.9 Global UMAP Results — `code/umap_data/global_umap_3D.npz`
+A global 3D UMAP embedding computed simultaneously across all 25 runs (50,750 snapshots) using an IncrementalPCA preprocessing step to fit into memory.
+
+| Key | Shape | Dtype | Description |
+|-----|-------|-------|-------------|
+| `embedding` | (50750, 3) | float32 | Global 3D UMAP coordinates |
+| `run_labels` | (50750,) | int32 | Experimental run ID corresponding to each point |
+| `st_labels` | (50750,) | float32 | Actuation Strouhal number ($St_{act}$) for each point |
+
+### 2.10 Individual UMAP Results — `code/umap_data/individual_umaps_3D.npz`
+Independent 3D UMAP embeddings computed separately for each of the 25 runs. Sourced from the individual PCA scores in `pca_data/` to capture local topology.
+
+| Key | Shape | Dtype | Description |
+|-----|-------|-------|-------------|
+| `[run_id]` | (2030, 3) | float32 | 3D UMAP coordinates for the specified run (e.g., `'1'`, `'2'`, etc.) |
+
+### 2.11 Run Information — `code/data/info.txt`
 Maps each run number to its actuation Strouhal number `St_act = f_act * D / U_inf`. Runs marked with `*` may have special significance. Run 1 has `St_act = 0` (natural, unforced jet).
 
 ## 3. Figures and Visualization
@@ -123,6 +167,9 @@ If the results contradict your expectations, report what you observe honestly. U
 - **Proactive Questions:** If you encounter blockers, ambiguities, or issues that compromise the quality of your output, halt your execution and ask the user for clarification.
 - **Comprehensive File Analysis:** If asked to analyze all files, you must go *file by file*. Analyze the code, explicitly evaluate whether it satisfies these project requirements, output the report directly in the chat, and offer a plan for improvements.
 
+## 7. Autonomous Documentation
+- **Self-Updating Context:** All agents must proactively update this `AGENTS.md` file with any significant architectural, contextual, or file-structure changes they make during their execution. If you create a new core script, delete an obsolete notebook, or discover an important data quirk (e.g., frequency scaling rules), you MUST append or modify the relevant sections of this document so future agents have up-to-date context. Only include relevant, project-wide information.
+
 ---
 
-*Note: This file is a living document. The user may update these rules as the thesis evolves.*
+*Note: This file is a living document. The user and the agents themselves must continuously update these rules as the thesis evolves.*
