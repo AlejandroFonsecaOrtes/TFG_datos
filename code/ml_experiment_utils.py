@@ -269,14 +269,263 @@ def create_leave_freq_out_split(run_labels, held_out_runs=HELD_OUT_RUNS):
 
 
 # ============================================================================
-# 4. t-SNE EMBEDDING WITH openTSNE
+# 4. t-SNE EMBEDDING (sklearn + out-of-sample projections)
 # ============================================================================
 
-def fit_and_transform_tsne(X_train, X_test, n_components=3, perplexity=50,
-                           random_state=RANDOM_STATE):
+def _calibrate_sigma(distances, target_perplexity, tol=1e-5, max_iter=200):
     """
-    Fit a t-SNE embedding on training data using openTSNE, then transform
-    test data via k-NN interpolation + gradient refinement.
+    Binary search for the Gaussian kernel bandwidth sigma that yields
+    the desired perplexity for a given set of neighbor distances.
+
+    Perplexity = 2^H(P), where H is the Shannon entropy of the
+    conditional probability distribution P_{j|i}.
+    """
+    lo, hi = 1e-10, 1e4
+
+    for _ in range(max_iter):
+        sigma = (lo + hi) / 2.0
+
+        # Compute conditional probabilities with this sigma
+        p = np.exp(-distances**2 / (2.0 * sigma**2))
+        sum_p = p.sum()
+
+        # Degenerate case: all probabilities collapsed to zero
+        if sum_p < 1e-12:
+            lo = sigma
+            continue
+
+        p = p / sum_p
+
+        # Compute Shannon entropy in bits
+        mask = p > 1e-12
+        entropy = -np.sum(p[mask] * np.log2(p[mask]))
+        perplexity = 2.0 ** entropy
+
+        if np.abs(perplexity - target_perplexity) < tol:
+            break
+        if perplexity > target_perplexity:
+            hi = sigma
+        else:
+            lo = sigma
+
+    return sigma
+
+
+def fit_tsne_embedding(X_train, n_components=3, perplexity=50,
+                       random_state=RANDOM_STATE):
+    """
+    Fit sklearn t-SNE on the training set only.
+
+    This helper keeps the t-SNE fitting step separate from the out-of-sample
+    projection step, so the same training embedding can be reused for both
+    KL-based and k-NN-based test projections without leaking test information
+    into the nonlinear embedding.
+    """
+    from sklearn.manifold import TSNE
+
+    print(f"Fitting sklearn TSNE (n_components={n_components}, "
+          f"perplexity={perplexity}) on {X_train.shape[0]} samples "
+          f"with {X_train.shape[1]} features...")
+
+    tsne = TSNE(
+        n_components=n_components,
+        perplexity=perplexity,
+        learning_rate='auto',
+        init='pca',
+        random_state=random_state,
+        n_jobs=-1
+    )
+
+    t0 = time.time()
+    train_embedding = tsne.fit_transform(X_train)
+    fit_time = time.time() - t0
+    print(f"  Fitting completed in {fit_time/60:.1f} minutes.")
+
+    return train_embedding, fit_time
+
+
+def _embed_new_points(X_train_hd, train_embedding, X_test_hd,
+                      k=50, perplexity=30):
+    """
+    Embed new (test) points into an existing t-SNE embedding by fixing
+    all training positions and optimizing each test point's position
+    individually via L-BFGS-B.
+
+    For each test point:
+      1. Find its k nearest neighbors in the high-dimensional space
+      2. Compute Gaussian affinities with perplexity-calibrated bandwidth
+      3. Initialize position as the affinity-weighted centroid of neighbors
+      4. Minimize the KL divergence between high-dimensional affinities (p)
+         and low-dimensional Student-t affinities (q), keeping training
+         positions fixed.
+
+    The low-dimensional q distribution is globally normalized over all
+    training points, not only over the k neighbors. This global denominator is
+    the repulsive part of the t-SNE objective. Without it, test points can move
+    arbitrarily far away because the local neighbor-only q distribution becomes
+    nearly uniform at infinity.
+
+    Parameters
+    ----------
+    X_train_hd : ndarray (n_train, n_features)
+        Training data in the original high-dimensional space.
+    train_embedding : ndarray (n_train, n_components)
+        Fixed training positions in the t-SNE embedding.
+    X_test_hd : ndarray (n_test, n_features)
+        Test data in the original high-dimensional space.
+    k : int
+        Number of nearest neighbors to consider (default 50).
+    perplexity : float
+        Target perplexity for the Gaussian kernel (default 30).
+
+    Returns
+    -------
+    test_embedding : ndarray (n_test, n_components)
+    """
+    from sklearn.neighbors import NearestNeighbors
+    from scipy.optimize import minimize
+
+    n_test = X_test_hd.shape[0]
+    n_comp = train_embedding.shape[1]
+
+    print(f"Finding {k}-NN for {n_test} test points...")
+
+    # Step 1: Find k nearest training neighbors for every test point
+    nn = NearestNeighbors(n_neighbors=k, n_jobs=-1)
+    nn.fit(X_train_hd)
+    distances, indices = nn.kneighbors(X_test_hd)
+
+    # Clamp target perplexity to be at most k-1 (can't exceed #neighbors)
+    target_perp = min(perplexity, k - 1)
+
+    test_embedding = np.zeros((n_test, n_comp))
+
+    for i in range(n_test):
+        dists_i = distances[i]                        # (k,)
+        nbr_idx = indices[i]                          # (k,)
+        nbr_pos = train_embedding[nbr_idx]            # (k, n_comp)
+
+        # Step 2: Calibrate sigma and compute high-dim affinities
+        sigma = _calibrate_sigma(dists_i, target_perp)
+        p = np.exp(-dists_i**2 / (2.0 * sigma**2))
+        p /= p.sum() + 1e-12
+
+        # Step 3: Initialize at affinity-weighted centroid
+        y0 = (p[:, None] * nbr_pos).sum(axis=0)
+
+        # Step 4: Optimize the KL divergence with global t-SNE normalization.
+        def objective_and_grad(y):
+            # q is normalized over all fixed training locations. This preserves
+            # the global repulsive force that prevents the previous exploding
+            # test-coordinate artifact.
+            diff_all = y[None, :] - train_embedding
+            sq_dist_all = np.sum(diff_all**2, axis=1)
+            q_unnorm_all = 1.0 / (1.0 + sq_dist_all)
+            z_all = q_unnorm_all.sum() + 1e-12
+            q_all = q_unnorm_all / z_all
+
+            q_k = q_all[nbr_idx]
+            q_unnorm_k = q_unnorm_all[nbr_idx]
+
+            # KL divergence: sum p * log(p/q)
+            kl = np.sum(p * np.log((p + 1e-12) / (q_k + 1e-12)))
+
+            # Attractive term: pull y toward the high-dimensional neighbors.
+            attr_factor = p * q_unnorm_k
+            grad_attr = np.sum(
+                attr_factor[:, None] * (y[None, :] - nbr_pos),
+                axis=0
+            )
+
+            # Repulsive term: push y away from all fixed training points.
+            rep_factor = q_all * q_unnorm_all
+            grad_rep = np.sum(rep_factor[:, None] * diff_all, axis=0)
+
+            # For the single-point out-of-sample objective
+            # C(y) = sum_j p_j log(p_j / q_j), the derivative is
+            # 2 * (attraction - repulsion). The familiar factor 4 in standard
+            # t-SNE comes from the symmetric full-embedding objective.
+            grad = 2.0 * (grad_attr - grad_rep)
+
+            return kl, grad
+
+        result = minimize(
+            objective_and_grad, y0, jac=True,
+            method='L-BFGS-B',
+            options={'maxiter': 300, 'ftol': 1e-12}
+        )
+        test_embedding[i] = result.x
+
+        if (i + 1) % 2000 == 0:
+            print(f"    Embedded {i+1}/{n_test} test points...")
+
+    return test_embedding
+
+
+def embed_new_points_knn(X_train_hd, train_embedding, X_test_hd, k=10):
+    """
+    Embed test points by inverse-distance-weighted k-NN interpolation.
+
+    This is a deterministic, inexpensive baseline for t-SNE out-of-sample
+    projection. It does not optimize a t-SNE objective; it places each test
+    snapshot at the weighted average of its nearest training coordinates in
+    the already fitted t-SNE space.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    print(f"Finding {k}-NN for {X_test_hd.shape[0]} test points "
+          "in high-dimensional space...")
+    t0 = time.time()
+
+    nn = NearestNeighbors(n_neighbors=k, n_jobs=-1)
+    nn.fit(X_train_hd)
+    distances, indices = nn.kneighbors(X_test_hd)
+
+    # Inverse-distance weights emphasize the nearest physically similar
+    # snapshots while the small epsilon avoids division by zero.
+    weights = 1.0 / (distances + 1e-8)
+    weights /= weights.sum(axis=1, keepdims=True)
+
+    test_embedding = np.zeros(
+        (X_test_hd.shape[0], train_embedding.shape[1]),
+        dtype=train_embedding.dtype
+    )
+    for i in range(X_test_hd.shape[0]):
+        test_embedding[i] = np.average(
+            train_embedding[indices[i]],
+            axis=0,
+            weights=weights[i]
+        )
+
+    print(f"  k-NN interpolation completed in {time.time() - t0:.1f} seconds.")
+    return test_embedding
+
+
+def embed_new_points_kl(X_train_hd, train_embedding, X_test_hd,
+                        k=50, perplexity=30):
+    """
+    Public wrapper for the globally normalized KL out-of-sample t-SNE method.
+
+    Keeping this wrapper separate from the private implementation makes
+    notebooks clearer: the method name states the mathematical objective being
+    used, while the implementation remains available for backward-compatible
+    calls through fit_and_transform_tsne().
+    """
+    return _embed_new_points(
+        X_train_hd,
+        train_embedding,
+        X_test_hd,
+        k=k,
+        perplexity=perplexity
+    )
+
+
+def fit_and_transform_tsne(X_train, X_test, n_components=3, perplexity=50,
+                           k_neighbors=50, random_state=RANDOM_STATE,
+                           transform_method='kl'):
+    """
+    Fit sklearn t-SNE on training data, then embed test points by
+    projecting them into the fixed training embedding.
 
     Parameters
     ----------
@@ -287,7 +536,12 @@ def fit_and_transform_tsne(X_train, X_test, n_components=3, perplexity=50,
     n_components : int
         Dimensionality of the t-SNE embedding (default 3).
     perplexity : float
-        t-SNE perplexity parameter (default 50).
+        t-SNE perplexity parameter for fitting (default 50).
+    k_neighbors : int
+        Number of nearest neighbors for out-of-sample embedding (default 50).
+    transform_method : {'kl', 'knn'}
+        Out-of-sample projection method. 'kl' uses the globally normalized
+        KL-divergence objective; 'knn' uses inverse-distance interpolation.
 
     Returns
     -------
@@ -296,39 +550,35 @@ def fit_and_transform_tsne(X_train, X_test, n_components=3, perplexity=50,
     fit_time : float
         Time to fit the embedding on training data (seconds).
     transform_time : float
-        Time to transform test data (seconds).
+        Time to embed test data (seconds).
     """
-    from openTSNE import TSNE
-
-    print(f"Fitting openTSNE (n_components={n_components}, "
-          f"perplexity={perplexity}) on {X_train.shape[0]} samples "
-          f"with {X_train.shape[1]} features...")
-
-    tsne = TSNE(
+    train_embedding, fit_time = fit_tsne_embedding(
+        X_train,
         n_components=n_components,
         perplexity=perplexity,
-        initialization="pca",
-        negative_gradient_method="bh",
-        random_state=random_state,
-        n_jobs=-1,
-        verbose=True
+        random_state=random_state
     )
 
-    # Fit on training data
+    # Embed test data while keeping the training positions fixed.
+    print(f"Embedding {X_test.shape[0]} test points with "
+          f"{transform_method!r} projection (k={k_neighbors})...")
     t0 = time.time()
-    train_embedding = tsne.fit(X_train)
-    fit_time = time.time() - t0
-    print(f"  Fitting completed in {fit_time/60:.1f} minutes.")
+    if transform_method == 'kl':
+        test_embedding = embed_new_points_kl(
+            X_train, train_embedding, X_test,
+            k=k_neighbors, perplexity=min(perplexity, k_neighbors - 1)
+        )
+    elif transform_method == 'knn':
+        test_embedding = embed_new_points_knn(
+            X_train, train_embedding, X_test, k=k_neighbors
+        )
+    else:
+        raise ValueError("transform_method must be either 'kl' or 'knn'.")
 
-    # Transform test data (out-of-sample via k-NN interpolation)
-    print(f"Transforming {X_test.shape[0]} test samples...")
-    t0 = time.time()
-    test_embedding = train_embedding.transform(X_test)
     transform_time = time.time() - t0
-    print(f"  Transform completed in {transform_time:.1f} seconds.")
+    print(f"  Embedding completed in {transform_time:.1f} seconds.")
 
-    return (np.array(train_embedding), np.array(test_embedding),
-            fit_time, transform_time)
+    return train_embedding, test_embedding, fit_time, transform_time
 
 
 # ============================================================================

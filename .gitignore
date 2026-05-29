@@ -27,6 +27,10 @@ external_data/
 *.pth
 *.pt
 *.ckpt
+*.csv
+*.json
+*.xlsx
+*.parquet
 
 # Logs / cache
 logs/
@@ -35,3 +39,4 @@ mlruns/
 *.log
 .DS_Store
 Thumbs.db
+
