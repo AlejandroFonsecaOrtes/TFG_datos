@@ -24,32 +24,6 @@ The current thesis pipeline combines:
 - Random Forest prediction tasks for phase, actuation frequency, and
   generalization to unseen frequencies.
 
-## Data Policy
-
-The `.mat` and `.npz` files are large, restricted research-group artifacts. They
-are not public repository assets and must not be redistributed, uploaded, or
-shared without explicit permission from the research group. This applies both to
-raw PIV files and to derived `.npz` caches, because the derived files still
-contain experimental data or data products computed from it.
-
-Do not overwrite, delete, or modify any stored `.mat` or `.npz` data files. All
-transformations should be saved as new derived artifacts. The repository
-`.gitignore` excludes these file types to keep confidential and heavy data out of
-version control.
-
-Prefer the compressed `.npz` files in `code/compressed_data/` for ordinary
-analysis. The raw `.mat` files in `code/data/` are much larger and should only
-be used when a variable is not available in the compressed files, such as
-phase-averaged fields, mean fields, Reynolds stresses, or stored POD outputs.
-
-Important snapshot-count convention:
-
-- Raw `RunX_PIV.mat` files store 2031 time steps.
-- Most compressed files store 2030 snapshots because the first time step is
-  discarded during preprocessing.
-- `RUN1_PIV_compressed.npz` is an exception and currently stores 2031
-  snapshots.
-
 ## Dataset
 
 The experiment consists of 25 runs of a turbulent jet at Reynolds number
@@ -61,10 +35,8 @@ Each velocity snapshot is defined on a `269 x 319` grid with two fluctuating
 velocity components, so one full snapshot has
 `2 x 269 x 319 = 171622` velocity coordinates.
 
-Access to the data files requires authorization from the research group. A fresh
-clone of the repository should not be expected to include the heavy `.mat` and
-`.npz` artifacts unless they have been provided separately through an approved
-channel.
+Access to the data files requires authorization from the research group. This repository does not 
+include the heavy `.mat` and `.npz` artifacts.
 
 | Artifact | Location | Main contents |
 | --- | --- | --- |
@@ -284,11 +256,5 @@ substantial RAM and disk space.
 - The notebooks document the computational history of the project. Some are
   exploratory or historical, while others produced thesis-ready figures and
   tables.
-- Prefer cached artifacts in `pca_data/`, `SPOD_data/`, `SPCA_data/`,
-  `tsne_data/`, `umap_data/`, and `ml_results/` when reproducing thesis figures.
-- Do not rerun expensive notebooks unless the intended output filenames are new
-  or the old outputs are known to be obsolete.
 - Treat notebooks that produced thesis figures or result tables as part of the
   experimental record.
-- Keep thesis-specific figures in `code/figures/thesis/` and avoid plot titles
-  inside saved figures; the thesis caption provides the interpretation.
